@@ -96,7 +96,7 @@ builtin_initialize widgetModuleAttrImpl : AttributeImpl ←
           if let some _ := (← builtinModulesRef.get).find? mod.javascriptHash then
             logWarning m!"A builtin widget module with the same hash(JS source code) was already registered."
         if let some (n, _) := moduleRegistry.getState env |>.find? mod.javascriptHash then
-          logWarning m!"A widget module with the same hash(JS source code) was already registered at {Expr.const n []}."
+          logWarning m!"A widget module with the same hash(JS source code) was already registered at {.ofConstName n true}."
         let env ← getEnv
         if builtin then
           let h := mkConst decl
@@ -400,7 +400,7 @@ open Lean Server RequestM in
 def getWidgets (pos : Lean.Lsp.Position) : RequestM (RequestTask (GetWidgetsResponse)) := do
   let doc ← readDoc
   let filemap := doc.meta.text
-  mapTask (findInfoTreeAtPos doc <| filemap.lspPosToUtf8Pos pos) fun
+  mapTask (findInfoTreeAtPosWithTrailingWhitespace doc <| filemap.lspPosToUtf8Pos pos) fun
     | some infoTree@(.context (.commandCtx cc) _) =>
       ContextInfo.runMetaM { cc with } {} do
       let env ← getEnv

@@ -7,7 +7,7 @@ Additional goodies for writing macros
 -/
 prelude
 import Init.MetaTypes
-import Init.Data.Array.Basic
+import Init.Data.Array.GetLit
 import Init.Data.Option.BasicAux
 
 namespace Lean
@@ -119,28 +119,55 @@ def isInaccessibleUserName : Name → Bool
   | Name.num p _   => isInaccessibleUserName p
   | _              => false
 
-def escapePart (s : String) : Option String :=
-  if s.length > 0 && isIdFirst (s.get 0) && (s.toSubstring.drop 1).all isIdRest then s
+/--
+Creates a round-trippable string name component if possible, otherwise returns `none`.
+Names that are valid identifiers are not escaped, and otherwise, if they do not contain `»`, they are escaped.
+- If `force` is `true`, then even valid identifiers are escaped.
+-/
+def escapePart (s : String) (force : Bool := false) : Option String :=
+  if s.length > 0 && !force && isIdFirst (s.get 0) && (s.toSubstring.drop 1).all isIdRest then s
   else if s.any isIdEndEscape then none
   else some <| idBeginEscape.toString ++ s ++ idEndEscape.toString
 
--- NOTE: does not roundtrip even with `escape = true` if name is anonymous or contains numeric part or `idEndEscape`
-variable (sep : String) (escape : Bool)
-def toStringWithSep : Name → String
+variable (sep : String) (escape : Bool) in
+/--
+Uses the separator `sep` (usually `"."`) to combine the components of the `Name` into a string.
+See the documentation for `Name.toString` for an explanation of `escape` and `isToken`.
+-/
+def toStringWithSep (n : Name) (isToken : String → Bool := fun _ => false) : String :=
+  match n with
   | anonymous       => "[anonymous]"
-  | str anonymous s => maybeEscape s
+  | str anonymous s => maybeEscape s (isToken s)
   | num anonymous v => toString v
-  | str n s         => toStringWithSep n ++ sep ++ maybeEscape s
-  | num n v         => toStringWithSep n ++ sep ++ Nat.repr v
+  | str n s         =>
+    -- Escape the last component if the identifier would otherwise be a token
+    let r := toStringWithSep n isToken
+    let r' := r ++ sep ++ maybeEscape s false
+    if escape && isToken r' then r ++ sep ++ maybeEscape s true else r'
+  | num n v         => toStringWithSep n (isToken := fun _ => false) ++ sep ++ Nat.repr v
 where
-  maybeEscape s := if escape then escapePart s |>.getD s else s
+  maybeEscape s force := if escape then escapePart s force |>.getD s else s
 
-protected def toString (n : Name) (escape := true) : String :=
+/--
+Converts a name to a string.
+
+- If `escape` is `true`, then escapes name components using `«` and `»` to ensure that
+  those names that can appear in source files round trip.
+  Names with number components, anonymous names, and names containing `»` might not round trip.
+  Furthermore, "pseudo-syntax" produced by the delaborator, such as `_`, `#0` or `?u`, is not escaped.
+- The optional `isToken` function is used when `escape` is `true` to determine whether more
+  escaping is necessary to avoid parser tokens.
+  The insertion algorithm works so long as parser tokens do not themselves contain `«` or `»`.
+-/
+protected def toString (n : Name) (escape := true) (isToken : String → Bool := fun _ => false) : String :=
   -- never escape "prettified" inaccessible names or macro scopes or pseudo-syntax introduced by the delaborator
-  toStringWithSep "." (escape && !n.isInaccessibleUserName && !n.hasMacroScopes && !maybePseudoSyntax) n
+  toStringWithSep "." (escape && !n.isInaccessibleUserName && !n.hasMacroScopes && !maybePseudoSyntax) n isToken
 where
   maybePseudoSyntax :=
-    if let .str _ s := n.getRoot then
+    if n == `_ then
+      -- output hole as is
+      true
+    else if let .str _ s := n.getRoot then
       -- could be pseudo-syntax for loose bvar or universe mvar, output as is
       "#".isPrefixOf s || "?".isPrefixOf s
     else
@@ -602,6 +629,9 @@ def mkStrLit (val : String) (info := SourceInfo.none) : StrLit :=
 def mkNumLit (val : String) (info := SourceInfo.none) : NumLit :=
   mkLit numLitKind val info
 
+def mkNatLit (val : Nat) (info := SourceInfo.none) : NumLit :=
+  mkLit numLitKind (toString val) info
+
 def mkScientificLit (val : String) (info := SourceInfo.none) : TSyntax scientificLitKind :=
   mkLit scientificLitKind val info
 
@@ -835,7 +865,7 @@ partial def decodeRawStrLitAux (s : String) (i : String.Pos) (num : Nat) : Strin
 /--
 Takes the string literal lexical syntax parsed by the parser and interprets it as a string.
 This is where escape sequences are processed for example.
-The string `s` is is either a plain string literal or a raw string literal.
+The string `s` is either a plain string literal or a raw string literal.
 
 If it returns `none` then the string literal is ill-formed, which indicates a bug in the parser.
 The function is not required to return `none` if the string literal is ill-formed.
@@ -1382,64 +1412,87 @@ namespace Parser
 
 namespace Tactic
 
-/-- `erw [rules]` is a shorthand for `rw (config := { transparency := .default }) [rules]`.
+/--
+Extracts the items from a tactic configuration,
+either a `Lean.Parser.Tactic.optConfig`, `Lean.Parser.Tactic.config`, or these wrapped in null nodes.
+-/
+partial def getConfigItems (c : Syntax) : TSyntaxArray ``configItem :=
+  if c.isOfKind nullKind then
+    c.getArgs.flatMap getConfigItems
+  else
+    match c with
+    | `(optConfig| $items:configItem*) => items
+    | `(config| (config := $_)) => #[⟨c⟩] -- handled by mkConfigItemViews
+    | _ => #[]
+
+def mkOptConfig (items : TSyntaxArray ``configItem) : TSyntax ``optConfig :=
+  ⟨Syntax.node1 .none ``optConfig (mkNullNode items)⟩
+
+/--
+Appends two tactic configurations.
+The configurations can be `Lean.Parser.Tactic.optConfig`, `Lean.Parser.Tactic.config`,
+or these wrapped in null nodes (for example because the syntax is `(config)?`).
+-/
+def appendConfig (cfg cfg' : Syntax) : TSyntax ``optConfig :=
+  mkOptConfig <| getConfigItems cfg ++ getConfigItems cfg'
+
+/-- `erw [rules]` is a shorthand for `rw (transparency := .default) [rules]`.
 This does rewriting up to unfolding of regular definitions (by comparison to regular `rw`
 which only unfolds `@[reducible]` definitions). -/
-macro "erw" s:rwRuleSeq loc:(location)? : tactic =>
-  `(tactic| rw (config := { transparency := .default }) $s $(loc)?)
+macro "erw" c:optConfig s:rwRuleSeq loc:(location)? : tactic => do
+  `(tactic| rw $[$(getConfigItems c)]* (transparency := .default) $s:rwRuleSeq $(loc)?)
 
 syntax simpAllKind := atomic(" (" &"all") " := " &"true" ")"
 syntax dsimpKind   := atomic(" (" &"dsimp") " := " &"true" ")"
 
 macro (name := declareSimpLikeTactic) doc?:(docComment)?
     "declare_simp_like_tactic" opt:((simpAllKind <|> dsimpKind)?)
-    ppSpace tacName:ident ppSpace tacToken:str ppSpace updateCfg:term : command => do
+    ppSpace tacName:ident ppSpace tacToken:str ppSpace cfg:optConfig : command => do
   let (kind, tkn, stx) ←
     if opt.raw.isNone then
-      pure (← `(``simp), ← `("simp"), ← `($[$doc?:docComment]? syntax (name := $tacName) $tacToken:str (config)? (discharger)? (&" only")? (" [" (simpStar <|> simpErase <|> simpLemma),* "]")? (location)? : tactic))
+      pure (← `(``simp), ← `("simp"), ← `($[$doc?:docComment]? syntax (name := $tacName) $tacToken:str optConfig (discharger)? (&" only")? (" [" (simpStar <|> simpErase <|> simpLemma),* "]")? (location)? : tactic))
     else if opt.raw[0].getKind == ``simpAllKind then
-      pure (← `(``simpAll), ← `("simp_all"), ← `($[$doc?:docComment]? syntax (name := $tacName) $tacToken:str (config)? (discharger)? (&" only")? (" [" (simpErase <|> simpLemma),* "]")? : tactic))
+      pure (← `(``simpAll), ← `("simp_all"), ← `($[$doc?:docComment]? syntax (name := $tacName) $tacToken:str optConfig (discharger)? (&" only")? (" [" (simpErase <|> simpLemma),* "]")? : tactic))
     else
-      pure (← `(``dsimp), ← `("dsimp"), ← `($[$doc?:docComment]? syntax (name := $tacName) $tacToken:str (config)? (discharger)? (&" only")? (" [" (simpErase <|> simpLemma),* "]")? (location)? : tactic))
+      pure (← `(``dsimp), ← `("dsimp"), ← `($[$doc?:docComment]? syntax (name := $tacName) $tacToken:str optConfig (discharger)? (&" only")? (" [" (simpErase <|> simpLemma),* "]")? (location)? : tactic))
   `($stx:command
     @[macro $tacName] def expandSimp : Macro := fun s => do
-      let c ← match s[1][0] with
-        | `(config| (config := $$c)) => `(config| (config := $updateCfg $$c))
-        | _ => `(config| (config := $updateCfg {}))
+      let cfg ← `(optConfig| $cfg)
       let s := s.setKind $kind
       let s := s.setArg 0 (mkAtomFrom s[0] $tkn (canonical := true))
-      let r := s.setArg 1 (mkNullNode #[c])
-      return r)
+      let s := s.setArg 1 (appendConfig s[1] cfg)
+      let s := s.mkSynthetic
+      return s)
 
 /-- `simp!` is shorthand for `simp` with `autoUnfold := true`.
 This will rewrite with all equation lemmas, which can be used to
 partially evaluate many definitions. -/
-declare_simp_like_tactic simpAutoUnfold "simp! " fun (c : Lean.Meta.Simp.Config) => { c with autoUnfold := true }
+declare_simp_like_tactic simpAutoUnfold "simp! " (autoUnfold := true)
 
 /-- `simp_arith` is shorthand for `simp` with `arith := true` and `decide := true`.
 This enables the use of normalization by linear arithmetic. -/
-declare_simp_like_tactic simpArith "simp_arith " fun (c : Lean.Meta.Simp.Config) => { c with arith := true, decide := true }
+declare_simp_like_tactic simpArith "simp_arith " (arith := true) (decide := true)
 
 /-- `simp_arith!` is shorthand for `simp_arith` with `autoUnfold := true`.
 This will rewrite with all equation lemmas, which can be used to
 partially evaluate many definitions. -/
-declare_simp_like_tactic simpArithAutoUnfold "simp_arith! " fun (c : Lean.Meta.Simp.Config) => { c with arith := true, autoUnfold := true, decide := true }
+declare_simp_like_tactic simpArithAutoUnfold "simp_arith! " (arith := true) (autoUnfold := true) (decide := true)
 
 /-- `simp_all!` is shorthand for `simp_all` with `autoUnfold := true`.
 This will rewrite with all equation lemmas, which can be used to
 partially evaluate many definitions. -/
-declare_simp_like_tactic (all := true) simpAllAutoUnfold "simp_all! " fun (c : Lean.Meta.Simp.ConfigCtx) => { c with autoUnfold := true }
+declare_simp_like_tactic (all := true) simpAllAutoUnfold "simp_all! " (autoUnfold := true)
 
 /-- `simp_all_arith` combines the effects of `simp_all` and `simp_arith`. -/
-declare_simp_like_tactic (all := true) simpAllArith "simp_all_arith " fun (c : Lean.Meta.Simp.ConfigCtx) => { c with arith := true, decide := true }
+declare_simp_like_tactic (all := true) simpAllArith "simp_all_arith " (arith := true) (decide := true)
 
 /-- `simp_all_arith!` combines the effects of `simp_all`, `simp_arith` and `simp!`. -/
-declare_simp_like_tactic (all := true) simpAllArithAutoUnfold "simp_all_arith! " fun (c : Lean.Meta.Simp.ConfigCtx) => { c with arith := true, autoUnfold := true, decide := true }
+declare_simp_like_tactic (all := true) simpAllArithAutoUnfold "simp_all_arith! " (arith := true) (autoUnfold := true) (decide := true)
 
 /-- `dsimp!` is shorthand for `dsimp` with `autoUnfold := true`.
 This will rewrite with all equation lemmas, which can be used to
 partially evaluate many definitions. -/
-declare_simp_like_tactic (dsimp := true) dsimpAutoUnfold "dsimp! " fun (c : Lean.Meta.DSimp.Config) => { c with autoUnfold := true }
+declare_simp_like_tactic (dsimp := true) dsimpAutoUnfold "dsimp! " (autoUnfold := true)
 
 end Tactic
 

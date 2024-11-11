@@ -483,30 +483,30 @@ theorem sublist_replicate_iff : l <+ replicate m a ↔ ∃ n, n ≤ m ∧ l = re
       rw [w]
       exact (replicate_sublist_replicate a).2 le
 
-theorem sublist_join_of_mem {L : List (List α)} {l} (h : l ∈ L) : l <+ L.join := by
+theorem sublist_flatten_of_mem {L : List (List α)} {l} (h : l ∈ L) : l <+ L.flatten := by
   induction L with
   | nil => cases h
   | cons l' L ih =>
     rcases mem_cons.1 h with (rfl | h)
     · simp [h]
-    · simp [ih h, join_cons, sublist_append_of_sublist_right]
+    · simp [ih h, flatten_cons, sublist_append_of_sublist_right]
 
-theorem sublist_join_iff {L : List (List α)} {l} :
-    l <+ L.join ↔
-      ∃ L' : List (List α), l = L'.join ∧ ∀ i (_ : i < L'.length), L'[i] <+ L[i]?.getD [] := by
+theorem sublist_flatten_iff {L : List (List α)} {l} :
+    l <+ L.flatten ↔
+      ∃ L' : List (List α), l = L'.flatten ∧ ∀ i (_ : i < L'.length), L'[i] <+ L[i]?.getD [] := by
   induction L generalizing l with
   | nil =>
     constructor
     · intro w
-      simp only [join_nil, sublist_nil] at w
+      simp only [flatten_nil, sublist_nil] at w
       subst w
       exact ⟨[], by simp, fun i x => by cases x⟩
     · rintro ⟨L', rfl, h⟩
-      simp only [join_nil, sublist_nil, join_eq_nil]
+      simp only [flatten_nil, sublist_nil, flatten_eq_nil_iff]
       simp only [getElem?_nil, Option.getD_none, sublist_nil] at h
       exact (forall_getElem (p := (· = []))).1 h
   | cons l' L ih =>
-    simp only [join_cons, sublist_append_iff, ih]
+    simp only [flatten_cons, sublist_append_iff, ih]
     constructor
     · rintro ⟨l₁, l₂, rfl, s, L', rfl, h⟩
       refine ⟨l₁ :: L', by simp, ?_⟩
@@ -517,21 +517,21 @@ theorem sublist_join_iff {L : List (List α)} {l} :
       | nil =>
         exact ⟨[], [], by simp, by simp, [], by simp, fun i x => by cases x⟩
       | cons l₁ L' =>
-        exact ⟨l₁, L'.join, by simp, by simpa using h 0 (by simp), L', rfl,
+        exact ⟨l₁, L'.flatten, by simp, by simpa using h 0 (by simp), L', rfl,
           fun i lt => by simpa using h (i+1) (Nat.add_lt_add_right lt 1)⟩
 
-theorem join_sublist_iff {L : List (List α)} {l} :
-    L.join <+ l ↔
-      ∃ L' : List (List α), l = L'.join ∧ ∀ i (_ : i < L.length), L[i] <+ L'[i]?.getD [] := by
+theorem flatten_sublist_iff {L : List (List α)} {l} :
+    L.flatten <+ l ↔
+      ∃ L' : List (List α), l = L'.flatten ∧ ∀ i (_ : i < L.length), L[i] <+ L'[i]?.getD [] := by
   induction L generalizing l with
   | nil =>
     constructor
     · intro _
       exact ⟨[l], by simp, fun i x => by cases x⟩
     · rintro ⟨L', rfl, _⟩
-      simp only [join_nil, nil_sublist]
+      simp only [flatten_nil, nil_sublist]
   | cons l' L ih =>
-    simp only [join_cons, append_sublist_iff, ih]
+    simp only [flatten_cons, append_sublist_iff, ih]
     constructor
     · rintro ⟨l₁, l₂, rfl, s, L', rfl, h⟩
       refine ⟨l₁ :: L', by simp, ?_⟩
@@ -543,7 +543,7 @@ theorem join_sublist_iff {L : List (List α)} {l} :
         exact ⟨[], [], by simp, by simpa using h 0 (by simp), [], by simp,
           fun i x => by simpa using h (i+1) (Nat.add_lt_add_right x 1)⟩
       | cons l₁ L' =>
-        exact ⟨l₁, L'.join, by simp, by simpa using h 0 (by simp), L', rfl,
+        exact ⟨l₁, L'.flatten, by simp, by simpa using h 0 (by simp), L', rfl,
           fun i lt => by simpa using h (i+1) (Nat.add_lt_add_right lt 1)⟩
 
 @[simp] theorem isSublist_iff_sublist [BEq α] [LawfulBEq α] {l₁ l₂ : List α} :
@@ -667,7 +667,7 @@ theorem IsSuffix.length_le (h : l₁ <:+ l₂) : l₁.length ≤ l₂.length :=
 theorem IsPrefix.getElem {x y : List α} (h : x <+: y) {n} (hn : n < x.length) :
     x[n] = y[n]'(Nat.le_trans hn h.length_le) := by
   obtain ⟨_, rfl⟩ := h
-  exact (List.getElem_append n hn).symm
+  exact (List.getElem_append_left hn).symm
 
 -- See `Init.Data.List.Nat.Sublist` for `IsSuffix.getElem`.
 
@@ -725,16 +725,25 @@ theorem infix_iff_suffix_prefix {l₁ l₂ : List α} : l₁ <:+: l₂ ↔ ∃ t
 theorem IsInfix.eq_of_length (h : l₁ <:+: l₂) : l₁.length = l₂.length → l₁ = l₂ :=
   h.sublist.eq_of_length
 
+theorem IsInfix.eq_of_length_le (h : l₁ <:+: l₂) : l₂.length ≤ l₁.length → l₁ = l₂ :=
+  h.sublist.eq_of_length_le
+
 theorem IsPrefix.eq_of_length (h : l₁ <+: l₂) : l₁.length = l₂.length → l₁ = l₂ :=
   h.sublist.eq_of_length
+
+theorem IsPrefix.eq_of_length_le (h : l₁ <+: l₂) : l₂.length ≤ l₁.length → l₁ = l₂ :=
+  h.sublist.eq_of_length_le
 
 theorem IsSuffix.eq_of_length (h : l₁ <:+ l₂) : l₁.length = l₂.length → l₁ = l₂ :=
   h.sublist.eq_of_length
 
+theorem IsSuffix.eq_of_length_le (h : l₁ <:+ l₂) : l₂.length ≤ l₁.length → l₁ = l₂ :=
+  h.sublist.eq_of_length_le
+
 theorem prefix_of_prefix_length_le :
     ∀ {l₁ l₂ l₃ : List α}, l₁ <+: l₃ → l₂ <+: l₃ → length l₁ ≤ length l₂ → l₁ <+: l₂
-  | [], l₂, _, _, _, _ => nil_prefix
-  | a :: l₁, b :: l₂, _, ⟨r₁, rfl⟩, ⟨r₂, e⟩, ll => by
+  | [], _, _, _, _, _ => nil_prefix
+  | _ :: _, b :: _, _, ⟨_, rfl⟩, ⟨_, e⟩, ll => by
     injection e with _ e'; subst b
     rcases prefix_of_prefix_length_le ⟨_, rfl⟩ ⟨_, e'⟩ (le_of_succ_le_succ ll) with ⟨r₃, rfl⟩
     exact ⟨r₃, rfl⟩
@@ -829,11 +838,29 @@ theorem isPrefix_iff : l₁ <+: l₂ ↔ ∀ i (h : i < l₁.length), l₂[i]? =
       rw (config := {occs := .pos [2]}) [← Nat.and_forall_add_one]
       simp [Nat.succ_lt_succ_iff, eq_comm]
 
+theorem isPrefix_iff_getElem {l₁ l₂ : List α} :
+    l₁ <+: l₂ ↔ ∃ (h : l₁.length ≤ l₂.length), ∀ x (hx : x < l₁.length),
+      l₁[x] = l₂[x]'(Nat.lt_of_lt_of_le hx h) where
+  mp h := ⟨h.length_le, fun _ _ ↦ h.getElem _⟩
+  mpr h := by
+    obtain ⟨hl, h⟩ := h
+    induction l₂ generalizing l₁ with
+    | nil =>
+      simpa using hl
+    | cons _ _ tail_ih =>
+      cases l₁ with
+      | nil =>
+        exact nil_prefix
+      | cons _ _ =>
+        simp only [length_cons, Nat.add_le_add_iff_right, Fin.getElem_fin] at hl h
+        simp only [cons_prefix_cons]
+        exact ⟨h 0 (zero_lt_succ _), tail_ih hl fun a ha ↦ h a.succ (succ_lt_succ ha)⟩
+
 -- See `Init.Data.List.Nat.Sublist` for `isSuffix_iff` and `ifInfix_iff`.
 
 theorem isPrefix_filterMap_iff {β} {f : α → Option β} {l₁ : List α} {l₂ : List β} :
     l₂ <+: filterMap f l₁ ↔ ∃ l, l <+: l₁ ∧ l₂ = filterMap f l := by
-  simp only [IsPrefix, append_eq_filterMap]
+  simp only [IsPrefix, append_eq_filterMap_iff]
   constructor
   · rintro ⟨_, l₁, l₂, rfl, rfl, rfl⟩
     exact ⟨l₁, ⟨l₂, rfl⟩, rfl⟩
@@ -842,7 +869,7 @@ theorem isPrefix_filterMap_iff {β} {f : α → Option β} {l₁ : List α} {l�
 
 theorem isSuffix_filterMap_iff {β} {f : α → Option β} {l₁ : List α} {l₂ : List β} :
     l₂ <:+ filterMap f l₁ ↔ ∃ l, l <:+ l₁ ∧ l₂ = filterMap f l := by
-  simp only [IsSuffix, append_eq_filterMap]
+  simp only [IsSuffix, append_eq_filterMap_iff]
   constructor
   · rintro ⟨_, l₁, l₂, rfl, rfl, rfl⟩
     exact ⟨l₂, ⟨l₁, rfl⟩, rfl⟩
@@ -851,7 +878,7 @@ theorem isSuffix_filterMap_iff {β} {f : α → Option β} {l₁ : List α} {l�
 
 theorem isInfix_filterMap_iff {β} {f : α → Option β} {l₁ : List α} {l₂ : List β} :
     l₂ <:+: filterMap f l₁ ↔ ∃ l, l <:+: l₁ ∧ l₂ = filterMap f l := by
-  simp only [IsInfix, append_eq_filterMap, filterMap_eq_append]
+  simp only [IsInfix, append_eq_filterMap_iff, filterMap_eq_append_iff]
   constructor
   · rintro ⟨_, _, _, l₁, rfl, ⟨⟨l₂, l₃, rfl, rfl, rfl⟩, rfl⟩⟩
     exact ⟨l₃, ⟨l₂, l₁, rfl⟩, rfl⟩
@@ -885,7 +912,7 @@ theorem isInfix_map_iff {β} {f : α → β} {l₁ : List α} {l₂ : List β} :
 theorem isPrefix_replicate_iff {n} {a : α} {l : List α} :
     l <+: List.replicate n a ↔ l.length ≤ n ∧ l = List.replicate l.length a := by
   rw [IsPrefix]
-  simp only [append_eq_replicate]
+  simp only [append_eq_replicate_iff]
   constructor
   · rintro ⟨_, rfl, _, _⟩
     exact ⟨le_add_right .., ‹_›⟩
@@ -902,7 +929,7 @@ theorem isSuffix_replicate_iff {n} {a : α} {l : List α} :
 theorem isInfix_replicate_iff {n} {a : α} {l : List α} :
     l <:+: List.replicate n a ↔ l.length ≤ n ∧ l = List.replicate l.length a := by
   rw [IsInfix]
-  simp only [append_eq_replicate, length_append]
+  simp only [append_eq_replicate_iff, length_append]
   constructor
   · rintro ⟨_, _, rfl, ⟨-, _, _⟩, _⟩
     exact ⟨le_add_right_of_le (le_add_left ..), ‹_›⟩
@@ -911,14 +938,14 @@ theorem isInfix_replicate_iff {n} {a : α} {l : List α} :
     · simpa using Nat.sub_add_cancel h
     · simpa using w
 
-theorem infix_of_mem_join : ∀ {L : List (List α)}, l ∈ L → l <:+: join L
+theorem infix_of_mem_flatten : ∀ {L : List (List α)}, l ∈ L → l <:+: flatten L
   | l' :: _, h =>
     match h with
     | List.Mem.head .. => infix_append [] _ _
     | List.Mem.tail _ hlMemL =>
-      IsInfix.trans (infix_of_mem_join hlMemL) <| (suffix_append _ _).isInfix
+      IsInfix.trans (infix_of_mem_flatten hlMemL) <| (suffix_append _ _).isInfix
 
-theorem prefix_append_right_inj (l) : l ++ l₁ <+: l ++ l₂ ↔ l₁ <+: l₂ :=
+@[simp] theorem prefix_append_right_inj (l) : l ++ l₁ <+: l ++ l₂ ↔ l₁ <+: l₂ :=
   exists_congr fun r => by rw [append_assoc, append_right_inj]
 
 theorem prefix_cons_inj (a) : a :: l₁ <+: a :: l₂ ↔ l₁ <+: l₂ :=
@@ -949,7 +976,7 @@ theorem mem_of_mem_drop {n} {l : List α} (h : a ∈ l.drop n) : a ∈ l :=
   drop_subset _ _ h
 
 theorem drop_suffix_drop_left (l : List α) {m n : Nat} (h : m ≤ n) : drop n l <:+ drop m l := by
-  rw [← Nat.sub_add_cancel h, ← drop_drop]
+  rw [← Nat.sub_add_cancel h, Nat.add_comm, ← drop_drop]
   apply drop_suffix
 
 -- See `Init.Data.List.Nat.TakeDrop` for `take_prefix_take_left`.
@@ -1059,5 +1086,12 @@ theorem prefix_iff_eq_take : l₁ <+: l₂ ↔ l₁ = take (length l₁) l₂ :=
     fun e => e.symm ▸ take_prefix _ _⟩
 
 -- See `Init.Data.List.Nat.Sublist` for `suffix_iff_eq_append`, `prefix_take_iff`, and `suffix_iff_eq_drop`.
+
+/-! ### Deprecations -/
+
+@[deprecated sublist_flatten_of_mem (since := "2024-10-14")] abbrev sublist_join_of_mem := @sublist_flatten_of_mem
+@[deprecated sublist_flatten_iff (since := "2024-10-14")] abbrev sublist_join_iff := @sublist_flatten_iff
+@[deprecated flatten_sublist_iff (since := "2024-10-14")] abbrev flatten_join_iff := @flatten_sublist_iff
+@[deprecated infix_of_mem_flatten (since := "2024-10-14")] abbrev infix_of_mem_join := @infix_of_mem_flatten
 
 end List

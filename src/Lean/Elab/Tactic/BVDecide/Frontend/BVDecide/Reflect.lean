@@ -27,6 +27,8 @@ instance : ToExpr BVBinOp where
     | .xor => mkConst ``BVBinOp.xor
     | .add => mkConst ``BVBinOp.add
     | .mul => mkConst ``BVBinOp.mul
+    | .udiv => mkConst ``BVBinOp.udiv
+    | .umod => mkConst ``BVBinOp.umod
   toTypeExpr := mkConst ``BVBinOp
 
 instance : ToExpr BVUnOp where
@@ -75,10 +77,9 @@ instance : ToExpr Gate where
   toExpr x :=
     match x with
     | .and => mkConst ``Gate.and
-    | .or => mkConst ``Gate.or
     | .xor => mkConst ``Gate.xor
-    | .imp => mkConst ``Gate.imp
     | .beq => mkConst ``Gate.beq
+    | .imp => mkConst ``Gate.imp
   toTypeExpr := mkConst ``Gate
 
 instance : ToExpr BVPred where
@@ -101,6 +102,7 @@ where
   | .const b => mkApp2 (mkConst ``BoolExpr.const) (toTypeExpr α) (toExpr b)
   | .not x => mkApp2 (mkConst ``BoolExpr.not) (toTypeExpr α) (go x)
   | .gate g x y => mkApp4 (mkConst ``BoolExpr.gate) (toTypeExpr α) (toExpr g) (go x) (go y)
+  | .ite d l r => mkApp4 (mkConst ``BoolExpr.ite) (toTypeExpr α) (go d) (go l) (go r)
 
 
 open Lean.Meta
@@ -123,6 +125,76 @@ structure State where
 The reflection monad, used to track `BitVec` variables that we see as we traverse the context.
 -/
 abbrev M := StateRefT State MetaM
+
+/--
+A reified version of an `Expr` representing a `BVExpr`.
+-/
+structure ReifiedBVExpr where
+  width : Nat
+  /--
+  The reified expression.
+  -/
+  bvExpr : BVExpr width
+  /--
+  A proof that `bvExpr.eval atomsAssignment = originalBVExpr`.
+  -/
+  evalsAtAtoms : M Expr
+  /--
+  A cache for `toExpr bvExpr`.
+  -/
+  expr : Expr
+
+/--
+A reified version of an `Expr` representing a `BVPred`.
+-/
+structure ReifiedBVPred where
+  /--
+  The reified expression.
+  -/
+  bvPred : BVPred
+  /--
+  A proof that `bvPred.eval atomsAssignment = originalBVPredExpr`.
+  -/
+  evalsAtAtoms : M Expr
+  /--
+  A cache for `toExpr bvPred`
+  -/
+  expr : Expr
+
+/--
+A reified version of an `Expr` representing a `BVLogicalExpr`.
+-/
+structure ReifiedBVLogical where
+  /--
+  The reified expression.
+  -/
+  bvExpr : BVLogicalExpr
+  /--
+  A proof that `bvExpr.eval atomsAssignment = originalBVLogicalExpr`.
+  -/
+  evalsAtAtoms : M Expr
+  /--
+  A cache for `toExpr bvExpr`
+  -/
+  expr : Expr
+
+/--
+A reified version of an `Expr` representing a `BVLogicalExpr` that we know to be true.
+-/
+structure SatAtBVLogical where
+  /--
+  The reified expression.
+  -/
+  bvExpr : BVLogicalExpr
+  /--
+  A proof that `bvExpr.eval atomsAssignment = true`.
+  -/
+  satAtAtoms : M Expr
+  /--
+  A cache for `toExpr bvExpr`
+  -/
+  expr : Expr
+
 
 namespace M
 
@@ -170,6 +242,35 @@ where
     modify fun s => { s with atomsAssignmentCache := newAtomsAssignment }
 
 end M
+
+/--
+The state of the lemma reflection monad.
+-/
+structure LemmaState where
+  /--
+  The list of top level lemmas that got created on the fly during reflection.
+  -/
+  lemmas : Array SatAtBVLogical := #[]
+
+/--
+The lemma reflection monad. It extends the usual reflection monad `M` by adding the ability to
+add additional top level lemmas on the fly.
+-/
+abbrev LemmaM := StateRefT LemmaState M
+
+namespace LemmaM
+
+def run (m : LemmaM α) (state : LemmaState := {}) : M (α × Array SatAtBVLogical) := do
+  let (res, state) ← StateRefT'.run m state
+  return (res, state.lemmas)
+
+/--
+Add another top level lemma.
+-/
+def addLemma (lemma : SatAtBVLogical) : LemmaM Unit := do
+  modify fun s => { s with lemmas := s.lemmas.push lemma }
+
+end LemmaM
 
 end Frontend
 end Lean.Elab.Tactic.BVDecide

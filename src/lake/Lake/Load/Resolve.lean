@@ -34,7 +34,8 @@ def loadDepPackage
     relPkgDir := dep.relPkgDir
     relConfigFile := dep.configFile
     lakeOpts, leanOpts, reconfigure
-    remoteUrl? := dep.remoteUrl?
+    scope := dep.scope
+    remoteUrl := dep.remoteUrl
   }
   if let some env := env? then
     let ws ← IO.ofExcept <| ws.addFacetsFromEnv env leanOpts
@@ -209,10 +210,11 @@ def updateDep
         | .git (inputRev? := some rev) .. => s!" @ {repr rev}"
         | _ => ""
       logError (stdMismatchError depPkg.name.toString rev)
-    if let .error e ← IO.FS.removeDirAll depPkg.dir |>.toBaseIO then -- cleanup
-      -- Deleting git repositories via IO.FS.removeDirAll does not work reliably on Windows
-      logError s!"'{dep.name}' was downloaded incorrectly; \
-        you will need to manually delete '{depPkg.dir}': {e}"
+    if matDep.manifestEntry.src matches .git .. then
+      if let .error e ← IO.FS.removeDirAll depPkg.dir |>.toBaseIO then -- cleanup
+        -- Deleting git repositories via IO.FS.removeDirAll does not work reliably on Windows
+        logError s!"'{dep.name}' was downloaded incorrectly; \
+          you will need to manually delete '{depPkg.dir}': {e}"
     error s!"{pkg.name}: package '{depPkg.name}' was required as '{dep.name}'"
   return depPkg
 
