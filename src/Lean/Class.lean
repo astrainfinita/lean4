@@ -101,12 +101,11 @@ private partial def checkOutParam (i : Nat) (outParamFVarIds : Array FVarId) (ou
       checkOutParam (i+1) (outParamFVarIds.push fvarId) (outParams.push i) b
     if d.isOutParam then
       addOutParam ()
+    else if bi.isInstImplicit then
+      /- See issue #1852 for a motivation for `bi.isInstImplicit` -/
+      addOutParam ()
     else if d.hasAnyFVar fun fvarId => outParamFVarIds.contains fvarId then
-      if bi.isInstImplicit then
-        /- See issue #1852 for a motivation for `bi.isInstImplicit` -/
-        addOutParam ()
-      else
-        Except.error m!"invalid class, parameter #{i+1} depends on `outParam`, but it is not an `outParam`"
+      Except.error m!"invalid class, parameter #{i+1} depends on `outParam`, but it is not an `outParam`"
     else
       checkOutParam (i+1) outParamFVarIds outParams b
   | _ => return outParams
