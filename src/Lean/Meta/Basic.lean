@@ -8,7 +8,6 @@ module
 prelude
 public import Init.Control.Do
 public import Lean.Data.LOption
-public import Lean.Environment
 public import Lean.ClassAbbrev
 public import Lean.ReducibilityAttrs
 public import Lean.Util.MonadBacktrack
