@@ -665,7 +665,7 @@ def givenInstance («show» : flag true) (xs : TSyntaxArray `inline) :
 
     let fv ← mkFreshFVarId
     lctx := lctx.mkLocalDecl fv userName ty' BinderInfo.instImplicit
-    localInstances := localInstances.push { fvar := .fvar fv, className }
+    localInstances ← localInstances.addInstance className (.fvar fv) fv
 
     if hasUserName then
       addTermInfo' nameColonOpt[0] (.fvar fv)

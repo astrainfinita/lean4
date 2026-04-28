@@ -58,11 +58,11 @@ def introCore (mvarId : MVarId) (max : Nat) (names : Array Name) : SymM (Array F
       return names[i]
     else
       mkFreshUserName binderName
-  let updateLocalInsts (localInsts : LocalInstances) (fvar : Expr) (type : Expr) : LocalInstances :=
+  let updateLocalInsts (localInsts : LocalInstances) (fvar : Expr) (type : Expr) : MetaM LocalInstances :=
     if let some className := isClass? env type then
-      localInsts.push { fvar, className }
+      localInsts.addInstance className fvar fvar.fvarId!
     else
-      localInsts
+      return localInsts
   let rec visit (i : Nat) (lctx : LocalContext) (localInsts : LocalInstances) (fvars : Array Expr) (type : Expr) : SymM (Array Expr × MVarId) := do
     if i >= max then
       finalize lctx localInsts fvars type
@@ -74,7 +74,7 @@ def introCore (mvarId : MVarId) (max : Nat) (names : Array Name) : SymM (Array F
       let lctx       := lctx.mkLocalDecl fvarId (← mkName n i) type bi
       let fvar       ← mkFVarS fvarId
       let fvars      := fvars.push fvar
-      let localInsts := updateLocalInsts localInsts fvar type
+      let localInsts ← updateLocalInsts localInsts fvar type
       visit (i+1) lctx localInsts fvars body
     | .letE n type value body nondep =>
       let type       ← instantiateRevS type fvars
@@ -88,7 +88,7 @@ def introCore (mvarId : MVarId) (max : Nat) (names : Array Name) : SymM (Array F
       let lctx       := lctx.mkLetDecl fvarId (← mkName n i) type value
       let fvar       ← mkFVarS fvarId
       let fvars      := fvars.push fvar
-      let localInsts := updateLocalInsts localInsts fvar type
+      let localInsts ← updateLocalInsts localInsts fvar type
       visit (i+1) lctx localInsts fvars body
     | _ => finalize lctx localInsts fvars type
   let (fvars, mvarId') ← visit 0 mvarDecl.lctx mvarDecl.localInstances #[] mvarDecl.type
